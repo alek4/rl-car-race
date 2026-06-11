@@ -70,7 +70,7 @@ class TrackEnv(gym.Env):
         return None
 
     def _get_info(self):
-        return None
+        return self._agent_pos
 
     # ---------------------------------------------------------------------
     # Gymnasium API
@@ -84,7 +84,7 @@ class TrackEnv(gym.Env):
     ):
         super().reset(seed=seed)
 
-        self._agent_pos = self.centerline[0]
+        self._agent_pos = self.centerline[200]
         
         return self._get_obs(), self._get_info()
 
@@ -101,79 +101,75 @@ class TrackEnv(gym.Env):
     # ---------------------------------------------------------------------
 
     def render(self):
-        fig, ax = plt.subplots(figsize=(8, 8), facecolor="#1a1a2e")
-        ax.set_facecolor("#1a1a2e")
+        fig, ax = plt.subplots(figsize=(10, 7), facecolor="#12122a")
+        ax.set_facecolor("#12122a")
         ax.set_aspect("equal")
         ax.axis("off")
 
-        # --- Draw track boundaries ---
-        cl = self.centerline  # (N, 2)
-        normals = np.stack([-self.tangents[:, 1], self.tangents[:, 0]], axis=1)  # (N, 2) left normals
+        cl = self.centerline
+        normals = np.stack([-self.tangents[:, 1], self.tangents[:, 0]], axis=1)
 
         left  = cl + normals * (TRACK_WIDTH / 2)
         right = cl - normals * (TRACK_WIDTH / 2)
 
-        # Close the loop for drawing
-        left_closed  = np.vstack([left,  left[0]])
-        right_closed = np.vstack([right, right[0]])
-        cl_closed    = np.vstack([cl,    cl[0]])
+        left_c  = np.vstack([left,  left[0]])
+        right_c = np.vstack([right, right[0]])
+        cl_c    = np.vstack([cl,    cl[0]])
 
-        # Tarmac fill between boundaries
-        track_x = np.concatenate([left_closed[:, 0], right_closed[::-1, 0]])
-        track_y = np.concatenate([left_closed[:, 1], right_closed[::-1, 1]])
-        ax.fill(track_x, track_y, color="#2d2d2d", zorder=1)
+        # --- Track: white fill between boundaries, thin grey edges ---
+        track_x = np.concatenate([left_c[:, 0], right_c[::-1, 0]])
+        track_y = np.concatenate([left_c[:, 1], right_c[::-1, 1]])
+        ax.fill(track_x, track_y, color="white", zorder=1)
 
-        # White dashed centerline
-        ax.plot(cl_closed[:, 0], cl_closed[:, 1],
-                color="white", linewidth=0.8, linestyle="--", alpha=0.4, zorder=2)
+        # Boundary edges (thin dark lines so the border is crisp)
+        ax.plot(left_c[:, 0],  left_c[:, 1],  color="#555", linewidth=0.8, zorder=2)
+        ax.plot(right_c[:, 0], right_c[:, 1], color="#555", linewidth=0.8, zorder=2)
 
-        # Track edges (kerb-style red/white — just solid lines here)
-        ax.plot(left_closed[:, 0],  left_closed[:, 1],  color="#e63946", linewidth=1.5, zorder=3)
-        ax.plot(right_closed[:, 0], right_closed[:, 1], color="#e63946", linewidth=1.5, zorder=3)
+        # --- Start/finish line: bold red line extending beyond track borders ---
+        sf_mid = (left[0] + right[0]) / 2
+        perp   = left[0] - right[0]   # vector across full track width
+        unit_perp = perp / np.linalg.norm(perp)
+        overshoot = TRACK_WIDTH * 0.8   # how far beyond each edge
 
-        # --- Start/finish line ---
-        start_l = left[0]
-        start_r = right[0]
-        ax.plot([start_l[0], start_r[0]], [start_l[1], start_r[1]],
-                color="white", linewidth=2.5, zorder=4, solid_capstyle="round")
-        ax.text((start_l[0] + start_r[0]) / 2,
-                (start_l[1] + start_r[1]) / 2,
-                "S/F", color="white", fontsize=7, ha="center", va="center",
-                fontweight="bold", zorder=5)
+        start = right[0] - unit_perp * overshoot
+        end   = left[0]  + unit_perp * overshoot
 
-        # --- Draw the car (if episode has started) ---
+        ax.plot(
+            [start[0], end[0]],
+            [start[1], end[1]],
+            color="#e8002d", linewidth=3.0, zorder=4, solid_capstyle="butt"
+        )
+
+        # --- Car arrow: sized relative to track width ---
         if self._agent_pos is not None:
             car_x, car_y = self._agent_pos[:2]
 
-            # Find nearest centerline index to get heading
             diffs = self.centerline - np.array([car_x, car_y])
-            idx = int(np.argmin((diffs ** 2).sum(axis=1)))
-            heading = self.tangents[idx]  # unit vector
+            idx   = int(np.argmin((diffs ** 2).sum(axis=1)))
+            heading = self.tangents[idx]
 
-            arrow_len = TRACK_WIDTH * 0.6
+            arrow_len = TRACK_WIDTH * 0.5   # half track width — fits inside the track
+            dx = heading[0] * arrow_len
+            dy = heading[1] * arrow_len
+
             ax.annotate(
                 "",
-                xy=(car_x + heading[0] * arrow_len, car_y + heading[1] * arrow_len),
-                xytext=(car_x, car_y),
+                xy    =(car_x + dx,        car_y + dy),
+                xytext=(car_x - dx * 0.5,  car_y - dy * 0.5),
                 arrowprops=dict(
-                    arrowstyle="-|>",
-                    color="#f4d35e",
-                    lw=2.0,
-                    mutation_scale=14,
+                    arrowstyle="simple,head_width=0.8,head_length=0.6",
+                    color="#e8002d",
+                    lw=0,
                 ),
-                zorder=6,
+                zorder=5,
             )
-            ax.plot(car_x, car_y, "o", color="#f4d35e",
-                    markersize=7, markeredgecolor="white", markeredgewidth=0.8, zorder=7)
 
-        # --- Title / step counter ---
-        step_str = f"Step {getattr(self, '_step', 0)}"
-        ax.set_title(step_str, color="white", fontsize=10, pad=6)
+        ax.set_title(f"Step {getattr(self, '_step', 0)}",
+                    color="white", fontsize=11, pad=8)
 
-        # --- Render to numpy array ---
         fig.tight_layout(pad=0.3)
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=120, bbox_inches="tight",
+        fig.savefig(buf, format="png", dpi=130, bbox_inches="tight",
                     facecolor=fig.get_facecolor())
         buf.seek(0)
         plt.close(fig)
