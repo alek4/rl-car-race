@@ -61,16 +61,34 @@ class TrackEnv(gym.Env):
         self.render_mode = render_mode
 
         self._agent_pos = None
+        self._heading = None
+        self._speed = None
+        self._closest_idx = None
+        self._step_count = None
+
 
     # ---------------------------------------------------------------------
     # Helpers
     # ---------------------------------------------------------------------
 
     def _get_obs(self):
-        return None
+
+        s = self._closest_idx / self.n_points
+
+        # 1. compute norm tangent as nm
+        # 2. compute dot prod betw agent_pos and nm to get left/right side of track as sd
+        d = 0
+
+        return np.array([s, d, v_long, v_lat], dtype=np.float32)
 
     def _get_info(self):
-        return self._agent_pos
+        return {
+            "pos": self._agent_pos,
+            "heading": self._heading,
+            "speed": self._speed,
+            "closest_idx": self._closest_idx,
+            "step_count": self._step_count,
+        }
 
     # ---------------------------------------------------------------------
     # Gymnasium API
@@ -84,7 +102,11 @@ class TrackEnv(gym.Env):
     ):
         super().reset(seed=seed)
 
-        self._agent_pos = self.centerline[200]
+        self._agent_pos = self.centerline[0]
+        self._heading = self.tangents[0]
+        self._speed = 0
+        self._closest_idx = 0
+        self._step_count = 0
         
         return self._get_obs(), self._get_info()
 
@@ -92,7 +114,7 @@ class TrackEnv(gym.Env):
         if self._agent_pos is None:
             raise RuntimeError("step() called before reset().")
         if not self.action_space.contains(action):
-            raise ValueError(f"Invalid action {action!r}; expected 0..3.")
+            raise ValueError(f"Invalid action {action!r}.")
 
         return self._get_obs(), reward, terminated, truncated, self._get_info()
 
